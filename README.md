@@ -4,7 +4,7 @@ The torch_cmif library provides a fast implementation the cross mutual informati
 <br />
 <br />
 <br />
-In this library, the paper from J. Öfverstedt et al. has been implemented :
+In this library, the paper from J. Öfverstedt et al. has been implemented. The only difference is that we use equisize bins and we avoid the usage of the k-mean algorithm.
 <br />
 
 
@@ -81,9 +81,7 @@ with tempfile.NamedTemporaryFile() as fp:
     )
     im = F.interpolate(
         (
-            torchvision.io.read_image(
-                fp.name, torchvision.io.ImageReadMode.RGB
-            )
+            torchvision.io.read_image(fp.name, torchvision.io.ImageReadMode.RGB)
             .unsqueeze(0)
             .to(torch.float64)
             .div(255)
@@ -110,14 +108,10 @@ for _ in range(16):
     i = random.randint(imH // 2 + 1, im.size(-2) - imH // 2 - 1)
     j = random.randint(imW // 2 + 1, im.size(-1) - imW // 2 - 1)
 
-    imT = im[
-        :, :, i - imH // 2 : i + imH // 2 + 1, j - imW // 2 : j + imW // 2 + 1
-    ]
+    imT = im[:, :, i - imH // 2 : i + imH // 2 + 1, j - imW // 2 : j + imW // 2 + 1]
     if (
         (
-            torch_cmif.FastCMIF.findArgmax(
-                torch_cmif.FastCMIF(8, "none")(im, imT)
-            )
+            torch_cmif.FastCMIF.findArgmax(torch_cmif.FastCMIF(8, "none")(im, imT))
             - torch.Tensor([[[i]], [[j]]])
         ).abs()
         < 3
