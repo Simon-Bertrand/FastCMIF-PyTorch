@@ -42,10 +42,7 @@ class FastCMIF(nn.Module):
         return torch.stack([aMax // x.size(-1), aMax % x.size(-1)])
 
     def _normalize(self, im):
-        minV, maxV = [
-            v.unsqueeze(-1)
-            for v in im.flatten(-2, -1).aminmax(dim=(-1), keepdim=True)
-        ]
+        minV, maxV = [v.unsqueeze(-1) for v in im.flatten(-2, -1).aminmax(dim=(-1), keepdim=True)]
         return (im - minV) / (maxV - minV)
 
     def _quantify(self, im):
@@ -55,9 +52,7 @@ class FastCMIF(nn.Module):
         return torch.nn.functional.one_hot(im, self.nBins).moveaxis(-1, -3)
 
     @torch.compile
-    def _chooseNorm(
-        self, norm: Literal["none", "sum", "joint", "max", "sqrt", "min"]
-    ):
+    def _chooseNorm(self, norm: Literal["none", "sum", "joint", "max", "sqrt", "min"]):
         """
         Chooses the normalization function based on the given normalization
         type.
@@ -166,34 +161,22 @@ class FastCMIF(nn.Module):
         Returns:
             torch.Tensor: Convolved output tensor.
         """
-        return (
-            torch.fft.irfft2(
-                torch.fft.rfft2(
-                    im,
-                    s=(
-                        padded_shape := (
-                            self._nextFastLen(
-                                im.size(-2) + template.size(-2) - 1
-                            ),
-                            self._nextFastLen(
-                                im.size(-1) + template.size(-1) - 1
-                            ),
-                        )
-                    ),
-                )
-                * torch.fft.rfft2(
-                    torch.flip(template, dims=(-1, -2)), padded_shape
-                )
+        return torch.fft.irfft2(
+            torch.fft.rfft2(
+                im,
+                s=(
+                    padded_shape := (
+                        self._nextFastLen(im.size(-2) + template.size(-2) - 1),
+                        self._nextFastLen(im.size(-1) + template.size(-1) - 1),
+                    )
+                ),
             )
-            .index_select(
-                -2,
-                torch.arange(padHt, padHt + im.size(-2), device=im.device),
-            )
-            .index_select(
-                -1,
-                torch.arange(padWl, padWl + im.size(-1), device=im.device),
-            )
-        )
+            * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
+        )[
+            ...,
+            padHt : padHt + im.size(-2),
+            padWl : padWl + im.size(-1),
+        ]
 
     def forward(self, im, template):
         """
@@ -218,7 +201,7 @@ class FastCMIF(nn.Module):
             *padding,
         )
         N = Px.sum(-3, keepdim=True)
-        Pxy = self._fftconv(
-            imOh.unsqueeze(-3), templateOh.unsqueeze(-4), *padding
-        ) / N.unsqueeze(-3)
+        Pxy = self._fftconv(imOh.unsqueeze(-3), templateOh.unsqueeze(-4), *padding) / N.unsqueeze(
+            -3
+        )
         return self.norm(Pxy, Px / N, Py / N)
