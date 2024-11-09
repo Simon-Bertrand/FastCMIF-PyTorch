@@ -1,11 +1,52 @@
 from functools import lru_cache
 from typing import Literal
-import torch
 
+import torch
 from torch import nn
 
 
-class FastCMIF(nn.Module):
+class CMIFNormaliaztion:
+    def computeEntropies(self, Px, Py, Pxy):
+        return (
+            -(Px * Px.log()).where(Px > 0, 0).sum(-3),
+            -(Py * Py.log()).where(Py > 0, 0).sum(-3),
+            -(Pxy * Pxy.log()).where(Pxy > 0, 0).sum((-4, -3)),
+        )
+
+    def noneNorm(self, Pxy, Px, Py):
+        PxPy = Px.unsqueeze(-3) * Py.unsqueeze(-4)
+        return (
+            torch.nn.functional.kl_div(
+                PxPy.log(),
+                Pxy,
+                reduction="none",
+            )
+            .where((Pxy > 0) & (PxPy > 0), 0)
+            .sum(dim=(-4, -3))
+        )
+
+    def sumNorm(self, Pxy, Px, Py):
+        Hx, Hy, Hxy = self.computeEntropies(Px, Py, Pxy)
+        return 2 * (Hx + Hy - Hxy) / (Hx + Hy)
+
+    def jointNorm(self, Pxy, Px, Py):
+        Hx, Hy, Hxy = self.computeEntropies(Px, Py, Pxy)
+        return (Hx + Hy - Hxy) / Hxy
+
+    def maxNorm(self, Pxy, Px, Py):
+        Hx, Hy, Hxy = self.computeEntropies(Px, Py, Pxy)
+        return (Hx + Hy - Hxy) / torch.max(Hx, Hy)
+
+    def sqrtNorm(self, Pxy, Px, Py):
+        Hx, Hy, Hxy = self.computeEntropies(Px, Py, Pxy)
+        return (Hx + Hy - Hxy) / torch.sqrt(Hx * Hy)
+
+    def minNorm(self, Pxy, Px, Py):
+        Hx, Hy, Hxy = self.computeEntropies(Px, Py, Pxy)
+        return (Hx + Hy - Hxy) / torch.min(Hx, Hy)
+
+
+class FastCMIF(nn.Module, CMIFNormaliaztion):
     def __init__(
         self,
         nBins: int,
@@ -26,23 +67,10 @@ class FastCMIF(nn.Module):
         self.nBins = nBins
         self.norm = self._chooseNorm(norm)
 
-    @staticmethod
-    def findArgmax(x):
-        """
-        Finds the indices of the maximum values along the last dimension of
-        the input tensor.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-
-        Returns:
-            torch.Tensor: The indices of the maximum values.
-        """
-        aMax = x.flatten(-2, -1).argmax(dim=-1)
-        return torch.stack([aMax // x.size(-1), aMax % x.size(-1)])
-
     def _normalize(self, im):
-        minV, maxV = [v.unsqueeze(-1) for v in im.flatten(-2, -1).aminmax(dim=(-1), keepdim=True)]
+        minV, maxV = [
+            v.unsqueeze(-1) for v in im.flatten(-2, -1).aminmax(dim=(-1), keepdim=True)
+        ]
         return (im - minV) / (maxV - minV)
 
     def _quantify(self, im):
@@ -51,7 +79,6 @@ class FastCMIF(nn.Module):
     def _one_hot(self, im):
         return torch.nn.functional.one_hot(im, self.nBins).moveaxis(-1, -3)
 
-    @torch.compile
     def _chooseNorm(self, norm: Literal["none", "sum", "joint", "max", "sqrt", "min"]):
         """
         Chooses the normalization function based on the given normalization
@@ -69,84 +96,24 @@ class FastCMIF(nn.Module):
 
         """
 
-        def computeEntropies(Px, Py, Pxy):
-            return (
-                -(Px * Px.log()).where(Px > 0, 0).sum(-3),
-                -(Py * Py.log()).where(Py > 0, 0).sum(-3),
-                -(Pxy * Pxy.log()).where(Pxy > 0, 0).sum((-4, -3)),
-            )
-
-        def noneNorm(Pxy, Px, Py):
-            PxPy = Px.unsqueeze(-3) * Py.unsqueeze(-4)
-            return (
-                torch.nn.functional.kl_div(
-                    PxPy.log(),
-                    Pxy,
-                    reduction="none",
-                )
-                .where((Pxy > 0) & (PxPy > 0), 0)
-                .sum(dim=(-4, -3))
-            )
-
-        def sumNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return 2 * (Hx + Hy - Hxy) / (Hx + Hy)
-
-        def jointNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / Hxy
-
-        def maxNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / torch.max(Hx, Hy)
-
-        def sqrtNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / torch.sqrt(Hx * Hy)
-
-        def minNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / torch.min(Hx, Hy)
-
         match norm:
             case "none":
-                return noneNorm
+                return self.noneNorm
             case "sum":
-                return sumNorm
+                return self.sumNorm
             case "joint":
-                return jointNorm
+                return self.jointNorm
             case "max":
-                return maxNorm
+                return self.maxNorm
             case "sqrt":
-                return sqrtNorm
+                return self.sqrtNorm
             case "min":
-                return minNorm
+                return self.minNorm
             case _:
                 raise ValueError(
                     "Normalization must be one of 'none', 'sum', \
 'joint', 'max', 'sqrt', 'min'"
                 )
-
-    @lru_cache(maxsize=2)
-    def _nextFastLen(self, size):
-        """
-        Computes the next fast length for FFT-based method.
-
-        Args:
-            size (int): The current size.
-
-        Returns:
-            int: The next fast length.
-        """
-        next_size = size
-        while True:
-            remaining = next_size
-            for n in (2, 3, 5):
-                while (euclDiv := divmod(remaining, n))[1] == 0:
-                    remaining = euclDiv[0]
-            if remaining == 1:
-                return next_size
-            next_size += 1
 
     def _fftconv(self, im, template, padWl, padHt):
         """
@@ -166,16 +133,16 @@ class FastCMIF(nn.Module):
                 im,
                 s=(
                     padded_shape := (
-                        self._nextFastLen(im.size(-2) + template.size(-2) - 1),
-                        self._nextFastLen(im.size(-1) + template.size(-1) - 1),
+                        (im.size(-2) + template.size(-2) - template.size(-2) % 2),
+                        (im.size(-1) + template.size(-1) - template.size(-1) % 2),
                     )
                 ),
             )
-            * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
+            * torch.fft.rfft2(torch.flip(template, dims=(-2, -1)), padded_shape)
         )[
             ...,
-            padHt : padHt + im.size(-2),
-            padWl : padWl + im.size(-1),
+            (hH := template.size(-2) // 2) : -(hH),
+            (hW := template.size(-1) // 2) : -(hW),
         ]
 
     def forward(self, im, template):
@@ -201,7 +168,7 @@ class FastCMIF(nn.Module):
             *padding,
         )
         N = Px.sum(-3, keepdim=True)
-        Pxy = self._fftconv(imOh.unsqueeze(-3), templateOh.unsqueeze(-4), *padding) / N.unsqueeze(
-            -3
-        )
+        Pxy = self._fftconv(
+            imOh.unsqueeze(-3), templateOh.unsqueeze(-4), *padding
+        ) / N.unsqueeze(-3)
         return self.norm(Pxy, Px / N, Py / N)
