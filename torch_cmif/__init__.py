@@ -177,11 +177,22 @@ class FastCMIF(nn.Module, CMIFNormalization):
         ]
         imOh = self._one_hot(self._quantify(self._normalize(im)))
         templateOh = self._one_hot(self._quantify(self._normalize(template)))
-        Px, Py = self._fftconv(
-            torch.stack([imOh, torch.ones_like(imOh)]),
-            torch.stack([torch.ones_like(templateOh), templateOh]),
+        Px = self._fftconv(
+            imOh,
+            torch.ones_like(templateOh),
             *padding,
         )
+        Py = self._fftconv(
+            torch.ones_like(imOh),
+            templateOh,
+            *padding,
+        )
+        # Old version : Consume more memory
+        # Px, Py = self._fftconv(
+        #    torch.stack([imOh, torch.ones_like(imOh)]),
+        #    torch.stack([torch.ones_like(templateOh), templateOh]),
+        #    *padding,
+        # )
         N = Px.sum(-3, keepdim=True)
         Pxy = self._fftconv(
             imOh.unsqueeze(-3), templateOh.unsqueeze(-4), *padding
