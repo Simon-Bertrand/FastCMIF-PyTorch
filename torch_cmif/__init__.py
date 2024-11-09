@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 
-class CMIFNormaliaztion:
+class CMIFNormalization:
     def computeEntropies(self, Px, Py, Pxy):
         return (
             -(Px * Px.log()).where(Px > 0, 0).sum(-3),
@@ -46,7 +46,7 @@ class CMIFNormaliaztion:
         return (Hx + Hy - Hxy) / torch.min(Hx, Hy)
 
 
-class FastCMIF(nn.Module, CMIFNormaliaztion):
+class FastCMIF(nn.Module, CMIFNormalization):
     def __init__(
         self,
         nBins: int,
@@ -144,6 +144,21 @@ class FastCMIF(nn.Module, CMIFNormaliaztion):
             (hH := template.size(-2) // 2) : -(hH),
             (hW := template.size(-1) // 2) : -(hW),
         ]
+
+    @staticmethod
+    def findArgmax(x):
+        """
+        Finds the indices of the maximum values along the last dimension of
+        the input tensor.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            torch.Tensor: The indices of the maximum values.
+        """
+        aMax = x.flatten(-2, -1).argmax(dim=-1)
+        return torch.stack([aMax // x.size(-1), aMax % x.size(-1)])
 
     def forward(self, im, template):
         """
