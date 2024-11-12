@@ -3,7 +3,44 @@ from typing import Literal
 import torch
 
 from torch import nn
+def computeEntropies(Px, Py, Pxy):
+        return (
+            -(Px * Px.log()).where(Px > 0, 0).sum(-3),
+            -(Py * Py.log()).where(Py > 0, 0).sum(-3),
+            -(Pxy * Pxy.log()).where(Pxy > 0, 0).sum((-4, -3)),
+        )
 
+def noneNorm(Pxy, Px, Py):
+    PxPy = Px.unsqueeze(-3) * Py.unsqueeze(-4)
+    return (
+        torch.nn.functional.kl_div(
+            PxPy.log(),
+            Pxy,
+            reduction="none",
+        )
+        .where((Pxy > 0) & (PxPy > 0), 0)
+        .sum(dim=(-4, -3))
+    )
+
+def sumNorm(Pxy, Px, Py):
+    Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
+    return 2 * (Hx + Hy - Hxy) / (Hx + Hy)
+
+def jointNorm(Pxy, Px, Py):
+    Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
+    return (Hx + Hy - Hxy) / Hxy
+
+def maxNorm(Pxy, Px, Py):
+    Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
+    return (Hx + Hy - Hxy) / torch.max(Hx, Hy)
+
+def sqrtNorm(Pxy, Px, Py):
+    Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
+    return (Hx + Hy - Hxy) / torch.sqrt(Hx * Hy)
+
+def minNorm(Pxy, Px, Py):
+    Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
+    return (Hx + Hy - Hxy) / torch.min(Hx, Hy)
 
 class FastCMIF(nn.Module):
     def __init__(
@@ -69,44 +106,7 @@ class FastCMIF(nn.Module):
 
         """
 
-        def computeEntropies(Px, Py, Pxy):
-            return (
-                -(Px * Px.log()).where(Px > 0, 0).sum(-3),
-                -(Py * Py.log()).where(Py > 0, 0).sum(-3),
-                -(Pxy * Pxy.log()).where(Pxy > 0, 0).sum((-4, -3)),
-            )
 
-        def noneNorm(Pxy, Px, Py):
-            PxPy = Px.unsqueeze(-3) * Py.unsqueeze(-4)
-            return (
-                torch.nn.functional.kl_div(
-                    PxPy.log(),
-                    Pxy,
-                    reduction="none",
-                )
-                .where((Pxy > 0) & (PxPy > 0), 0)
-                .sum(dim=(-4, -3))
-            )
-
-        def sumNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return 2 * (Hx + Hy - Hxy) / (Hx + Hy)
-
-        def jointNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / Hxy
-
-        def maxNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / torch.max(Hx, Hy)
-
-        def sqrtNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / torch.sqrt(Hx * Hy)
-
-        def minNorm(Pxy, Px, Py):
-            Hx, Hy, Hxy = computeEntropies(Px, Py, Pxy)
-            return (Hx + Hy - Hxy) / torch.min(Hx, Hy)
 
         match norm:
             case "none":
